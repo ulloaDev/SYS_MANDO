@@ -1,0 +1,5 @@
+# Ignorar archivos sensibles
+.env
+/vendor/
+/config/database.php
+*.log

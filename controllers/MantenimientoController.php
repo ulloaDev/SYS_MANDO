@@ -1,5 +1,4 @@
 <?php
-
 class MantenimientoController {
     private $model;
 
@@ -8,84 +7,84 @@ class MantenimientoController {
         $this->model = new MantenimientoModel($db);
     }
 
-    /**
-     * Lista programaciones de mantenimiento en formato JSON
-     */
-    public function listar(): void {
+    public function listar() {
         try {
-            $filtros = [
-                'fecha_inicio' => $_GET['fecha_inicio'] ?? null,
-                'fecha_fin' => $_GET['fecha_fin'] ?? null
-            ];
+            header('Content-Type: application/json');
             
+            // Validar fechas
+            $filtros = [
+                'fecha_inicio' => isset($_GET['fecha_inicio']) ? 
+                    \DateTime::createFromFormat('Y-m-d', $_GET['fecha_inicio']) : null,
+                'fecha_fin' => isset($_GET['fecha_fin']) ? 
+                    \DateTime::createFromFormat('Y-m-d', $_GET['fecha_fin']) : null
+            ];
+
+            if (($filtros['fecha_inicio'] && !$filtros['fecha_inicio']) || 
+                ($filtros['fecha_fin'] && !$filtros['fecha_fin'])) {
+                throw new Exception("Formato de fecha inválido. Use YYYY-MM-DD");
+            }
+
             $resultados = $this->model->obtenerProgramacion($filtros);
             
-            $this->jsonResponse([
+            echo json_encode([
                 'success' => true,
                 'data' => $resultados,
                 'total' => count($resultados)
             ]);
 
-        } catch (PDOException $e) {
-            $this->jsonResponse([
+        } catch (Exception $e) {
+            http_response_code(400);
+            echo json_encode([
                 'success' => false,
-                'error' => 'Error en la base de datos',
-                'details' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-
-    public function calendario(): void {
-        try {
-            $this->validateRequestMethod(['GET']);
-            $params = $this->getRequestData();
-            
-            $vista = 'mantenimiento/calendario';
-            $datos = [
-                'eventos' => $this->model->obtenerProgramacion($params),
-                'tecnicos' => $this->model->obtenerTecnicos()
-            ];
-            
-            $this->renderView($vista, $datos);
-            
-        } catch (Throwable $e) {
-            $this->handleError($e, 'MantenimientoController::calendario');
-        }
-    }
-
-    public function guardar(): void {
-        try {
-            $this->validateRequestMethod(['POST']);
-            $datos = $this->getRequestData();
-            
-            if (empty($datos['equipo_id']) || empty($datos['scheduled_date'])) {
-                throw new Exception("Datos requeridos faltantes", 400);
-            }
-            
-            $resultado = $this->model->guardarProgramacion($datos);
-            $this->jsonResponse($resultado, 201);
-            
-        } catch (Throwable $e) {
-            $this->Exception($e, 'MantenimientoController::guardar', [
-                'input_data' => $datos ?? null
+                'error' => $e->getMessage()
             ]);
         }
     }
-private function validateRequestMethod(array $allowedMethods): void {
-    if (!in_array($_SERVER['REQUEST_METHOD'], $allowedMethods)) {
-        throw new Exception("Método no permitido", 405);
+
+    public function guardar() {
+        try {
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                throw new Exception("Método no permitido", 405);
+            }
+
+            $datos = json_decode(file_get_contents('php://input'), true);
+            
+            // Validación estricta
+            $camposRequeridos = ['equipo_id', 'scheduled_date'];
+            foreach ($camposRequeridos as $campo) {
+                if (empty($datos[$campo])) {
+                    throw new Exception("El campo $campo es requerido", 400);
+                }
+            }
+
+            // Sanitización
+            $datosLimpios = [
+                'equipo_id' => (int)$datos['equipo_id'],
+                'scheduled_date' => filter_var($datos['scheduled_date'], FILTER_SANITIZE_STRING),
+                'tecnico' => isset($datos['tecnico']) ? filter_var($datos['tecnico'], FILTER_SANITIZE_STRING) : null
+            ];
+
+            $resultado = $this->model->guardarProgramacion($datosLimpios);
+            
+            http_response_code(201);
+            echo json_encode([
+                'success' => true,
+                'data' => $resultado
+            ]);
+
+        } catch (PDOException $e) {
+            http_response_code(500);
+            echo json_encode([
+                'success' => false,
+                'error' => 'Error en la base de datos',
+                'details' => $e->getMessage()
+            ]);
+        } catch (Exception $e) {
+            http_response_code($e->getCode() ?: 400);
+            echo json_encode([
+                'success' => false,
+                'error' => $e->getMessage()
+            ]);
+        }
     }
 }
-
-private function getRequestData(): array {
-    return $_SERVER['REQUEST_METHOD'] === 'GET' ? $_GET : json_decode(file_get_contents('php://input'), true);
-}
-
-private function jsonResponse(array $data, int $statusCode = 200): void {
-    http_response_code($statusCode);
-    header('Content-Type: application/json');
-    echo json_encode($data);
-    exit;
-}
-    }
